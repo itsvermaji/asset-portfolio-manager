@@ -1,0 +1,27 @@
+version: '1'
+services:
+  influxdb:
+      container_name: influxdb_container
+      image: influxdb:2.7.7
+      env_file:
+        - .env
+      volumes:
+        - influxdb-storage:/var/lib/influxdb2:rw
+      entrypoint: ["./entrypoint.sh"]
+      restart: on-failure:10
+      ports:
+        - ${DOCKER_INFLUXDB_INIT_PORT}:${DOCKER_INFLUXDB_INIT_PORT}
+  
+  grafana:
+    container_name: grafana_container
+    image: grafana/grafana-enterprise
+    volumes:
+      - grafana-storage:/var/lib/grafana:rw
+    depends_on:
+      - influxdb
+    ports:
+      - ${GRAFANA_PORT}:3000
+  
+volumes:
+  influxdb-storage:
+  grafana-storage:
