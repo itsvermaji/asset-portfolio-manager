@@ -42,7 +42,3 @@ date = int(date) * 1000000000
 # utctime = date.astimezone().ti
 # date.n
 # date = date.strftime("%Y-%m-%d")
-
-
-writing_metrics_into_db(metrics, date)
-

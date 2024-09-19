@@ -50,11 +50,13 @@ class Holdings:
 
 class Metric:
     invested_amt = 0
-    curr_amt = 0
+    # balance = 0
+    # standing_val = 0
+    total_val = 0
     curr_gains = 0
     past_gains = 0
     total_gains = 0
-    gains_percent = 0
+    # gains_percent = 0
 
     def __init__(self, name):
         self.name = name

@@ -1,10 +1,40 @@
 import yfinance as yf
+
+from app_configs import metrics
 from models import *
 
+def get_holding_as_list(holding: Holdings, details: TickerDetails):
+    return [details.company_name, holding.qty, holding.avg_price, holding.curr_price,
+            holding.qty * holding.avg_price, holding.qty * holding.curr_price, holding.curr_gains, holding.past_gains]
 
-def write_to_portfolio_sheet(sheet, holdings, skip_cols):
-    sheet.update('A{}:E{}'.format(skip_cols + 1, len(holdings) + skip_cols), [[*holding] for holding in holdings])
+def write_to_portfolio_sheet(sheet, holdings , ticker_details_map, skip_cols):
+    # sort holdings
+    compr = lambda a: a.company_name
+    holdings.sort(key= compr)
 
+    holdings = [get_holding_as_list(holding, ticker_details_map.get(holding.ticker)) for holding in holdings]
+    sheet.update('A{}:H{}'.format(skip_cols + 1, len(holdings) + skip_cols), holdings)
+
+def get_metrics_as_list(metrics):
+    total: Metric = metrics['total']
+    equity: Metric = metrics['equity']
+    mutual_fund: Metric = metrics['mutual fund']
+
+    arr = [total, equity, mutual_fund]
+    metrics_list = []
+    for metric in arr:
+        metrics_list.append(metric.invested_amt)
+        metrics_list.append(metric.total_val)
+        metrics_list.append(metric.total_gains)
+        metrics_list.append(' ')
+
+    return metrics_list
+
+def write_to_daily_returns_sheet(sheet, metrics_to_write):
+    print(metrics_to_write)
+    skip_cols = 2
+    sheet.update(f'A{skip_cols + 1}:M{len(metrics_to_write) + skip_cols}', metrics_to_write)
+    # 'A{}:L{}'.format(skip_cols + 1, len(holdings) + skip_cols), holdings)
 
 # print(asyncio.run(get_ticker_price("ADANIPORTS.NS", "mf")))
 
@@ -14,29 +44,26 @@ def is_transaction_applicable(period, transaction):
     return False
 
 
-def update_portfolio(ticker_details_map, holdings_map, financial_data, date, balance, invested_money, transactions):
+def update_portfolio(transactions, date, ticker_details_map, holdings_map, financial_data, metrics):
     # do the update
-    # print("transactions")
-    # for txn in transactions:
-    #     print(txn)
-
     if transactions:
         for txn in transactions:
+
+            # transactions including bank
             if txn.txn_type.lower() == "equity_bal_deposit":
-                balance += txn.price
-                invested_money += txn.price
+                # metrics['equity'].balance += txn.price
+                # metrics['equity'].invested_amt += txn.price
                 continue
 
             elif txn.txn_type.lower() == "equity_ref_bank":
-                balance -= txn.price
-                invested_money -= txn.price
+                # metrics['equity'].balance -= txn.price
+                # metrics['equity'].invested_amt -= metrics['equity'].invested_amt * (txn.price/metrics['equity'].total_val)
                 continue
-
 
             ticker = txn.ticker
             company_name = ticker_details_map.get(ticker).company_name
             holding = holdings_map.get(ticker)  # holding tells company has been traded in the past
-
+            # asset_class = ticker_details_map.get(ticker).investmentType.lower()
 
             if txn.txn_type.lower() == "buy":
                 if holding is None:
@@ -49,7 +76,8 @@ def update_portfolio(ticker_details_map, holdings_map, financial_data, date, bal
                     holding.avg_price = (qty * avg_price + txn.qty * txn.price) / (qty + txn.qty)
                     holding.qty += txn.qty
 
-                balance -= txn.qty * txn.price
+                # metrics[asset_class].balance -= txn.qty * txn.price
+                # metrics[asset_class].invested_amt += txn.qty * txn.price
 
             elif txn.txn_type.lower() == "sell":
                 if holding is None:
@@ -61,7 +89,9 @@ def update_portfolio(ticker_details_map, holdings_map, financial_data, date, bal
                 else:
                     holding.qty -= txn.qty
                     holding.past_gains += (txn.price - holding.avg_price) * txn.qty  # gains will be recorded as past gains
-                    balance += txn.qty * txn.price
+                    # invested will decrease
+                    # metrics[asset_class].balance += txn.qty * txn.price
+                    # metrics[asset_class].invested_amt -= txn.qty * txn.price
 
     # updating portfolio with current share price
     [set_price(financial_data, date, holding) for holding in holdings_map.values() if holding.qty > 0]
@@ -107,30 +137,55 @@ def get_tickers_in_range(txn_list, start_date, end_date, holdings={}):
     return tickers
 
 def get_metrics_from_portfolio(all_ticker_details, holdings):
-    metrics = {}
+    metrics = {'total': Metric("Total"),
+               'equity': Metric("Equity"),
+               'mutual fund': Metric("Mutual Fund")
+               }
+
+
+    # for metric in metrics.values():
+    #     metric.standing_val = 0
+
     for ticker in holdings.keys():
         ticker_details = all_ticker_details.get(ticker)
         holding = holdings[ticker]
 
         # investment type metric
-        metric_name = ticker_details.investmentType
+        metric_name = ticker_details.investmentType.lower()
         metric = metrics.get(metric_name)
-        if not metric:
-            # create that metric
-            metrics[metric_name] = Metric(metric_name)
-            metric = metrics[metric_name]
+        # if not metric:
+        #     # create that metric
+        #     metrics[metric_name] = Metric(metric_name)
+        #     metric = metrics[metric_name]
 
         # now add rest of the information
-        metric.curr_gains += holding.curr_gains
+        # metric.curr_gains += holding.curr_gains
+        # metric.past_gains += holding.past_gains
+        # metric.total_gains = metric.curr_gains + metric.past_gains
+
+        if holding.qty > 0:
+            metric.total_val += holding.qty * holding.curr_price
+            # metric.total_gains = holding. + metric.balance
+            metric.curr_gains += holding.curr_gains
+
         metric.past_gains += holding.past_gains
         metric.total_gains = metric.curr_gains + metric.past_gains
-        metric.curr_amt += holding.curr_price + holding.past_gains
-        metric.invested_amt = metric.curr_amt - metric.total_gains
-        metric.gains_percent = (metric.curr_amt - metric.invested_amt)/metric.invested_amt
+        metric.invested_amt = metric.total_val - metric.total_gains
 
-        # sector type metric
+
+    total = metrics['total']
+    for metric in metrics.values():
+        if metric.name == 'total':
+            continue
+
+        total.total_val += metric.total_val
+        total.invested_amt += metric.invested_amt
+        total.total_gains += metric.total_gains
+
     return metrics
 
+        # metric.invested_amt = metric.curr_amt - metric.total_gains
+        # metric.gains_percent = (metric.curr_amt - metric.invested_amt)/metric.invested_amt
 
 # def is_equity(inp):
 #     if inp.lower() is 'equity':
@@ -141,3 +196,23 @@ def get_metrics_from_portfolio(all_ticker_details, holdings):
 #     if inp.lower() == 'mf' or inp.lower() == 'mutualfund' or inp.lower() == 'mutual fund' or inp.lower() == 'mutual_fund' or inp.lower() == 'm f':
 #         return True
 #     return False
+
+def reset_metrics(tickers_details_map):
+    metrics = {}
+    for ticker in tickers_details_map.values():
+        # metrics based upon asset class
+        assetClass = ticker.investmentType
+        metrics[assetClass.lower()] = Metric(assetClass)
+
+        # metrics based upon MarketCap
+        mCap = ticker.mktCap
+        metrics[mCap.lower()] = Metric(mCap)
+    return metrics
+
+
+def print_current_portfolio(holdings):
+    [print(holding) for holding in holdings.values() if holding.qty > 0]
+
+
+def get_past_portfolio(holdings):
+    return [holding for holding in holdings.values() if holding.qty <= 0]
